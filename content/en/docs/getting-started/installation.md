@@ -14,79 +14,64 @@ This document describes how to install OpenFunction.
 - You need to ensure your Kubernetes version meets the requirements described in the following compatibility matrix. 
 
 | OpenFunction Version | Kubernetes 1.17 | Kubernetes 1.18 | Kubernetes 1.19 | Kubernetes 1.20+ |
-| -------------------- | --------------- | --------------- | --------------- | ---------------- |
-| HEAD                 | √*              | √*              | √               | √                |
+|----------------------| --------------- | --------------- |-----------------| ---------------- |
+| HEAD                 | N/A             | N/A             | N/A             | √                |
+| v0.7.0               | N/A             | N/A             | N/A             | √                |
 | v0.6.0               | √*              | √*              | √               | √                |
-| v0.5.0               | √*              | √*              | √               | √                |
-| v0.4.0               | √               | √               | √               | √                |
-
-{{% alert title="Note" color="success" %}}
-
-OpenFunction has added the [function ingress](../../concepts/domain) in *release-0.5*, which means that:
-
-- You have to install OpenFunction in Kuberenetes ***v1.19*** or later if you enable this feature.
-- You can still use OpenFunction in Kubernetes ***v1.17—v1.20+*** without this feature enabled.
-
-For more information about OpenFunction components compatibility with Kubernetes, refer to [Component Compatibility Matrix](../../best-practices/customize-components#component-compatibility-matrix).
-
-{{% /alert %}}
 
 ## Install OpenFunction
 
-### Option 1: Helm
-This option is the **recommended** installation method.
+Now you can install OpenFunction and all its dependencies with helm charts.
+> The `ofn` CLI install method is deprecated.
 
-#### Requirements
+### Requirements
 - Kubernetes version: `>=v1.20.0-0`
 - Helm version: `>=v3.6.3`
 
-#### install the chart
-1. Run the following command to add the OpenFunction chart repository.
+### Steps to install OpenFunction helm charts
+
+1. Run the following command to add the OpenFunction chart repository first:
    ```shell
    helm repo add openfunction https://openfunction.github.io/charts/
    helm repo update
    ```
 
-2. Run the following command to install the OpenFunction chart.
-   ```shell
-   kubectl create namespace openfunction
-   helm install openfunction openfunction/openfunction -n openfunction
-   ```
-   {{% alert title="Note" color="success" %}}
+2. Then you have several options to setup OpenFunction, you can choose to:
 
-   For more information about how to install OpenFunction with Helm, see [Install OpenFunction with Helm](https://github.com/OpenFunction/charts/tree/release-0.6#install-the-chart).
-
-   {{% /alert %}}
-
-3. Run the following command to verify OpenFunction is ready.
-   ```shell
-   kubectl get pods -namespace openfunction
-   ```
-
-### Option 2: CLI
-1. Run the following command to download `ofn`, the CLI of OpenFunction.
-
-   ```shell
-   wget -c  https://github.com/OpenFunction/cli/releases/latest/download/ofn_linux_amd64.tar.gz -O - | tar -xz
-   ```
-
-2. Run the following commands to make `ofn` executable and move it to `/usr/local/bin/`.
-
-   ```shell
-   chmod +x ofn && mv ofn /usr/local/bin/
-   ```
-
-3. Run the following command to install OpenFunction.
-
-   ```shell
-   ofn install --all
-   ```
+   - Install all components:
+      ```shell
+      kubectl create namespace openfunction
+      helm install openfunction openfunction/openfunction -n openfunction
+      ```
+   
+   - Install Serving only (without build):
+      ```shell
+      kubectl create namespace openfunction
+      helm install openfunction --set global.ShipwrightBuild.enabled=false --set global.TektonPipelines.enabled=false openfunction/openfunction -n openfunction
+      ```
+   
+   - Install Knative sync runtime only:
+      ```shell
+      kubectl create namespace openfunction
+      helm install openfunction --set global.Keda.enabled=false openfunction/openfunction -n openfunction
+      ```
+   
+   - Install OpenFunction async runtime only:
+      ```shell
+      kubectl create namespace openfunction
+      helm install openfunction --set global.Contour.enabled=false  --set global.KnativeServing.enabled=false openfunction/openfunction -n openfunction
+      ```
 
    {{% alert title="Note" color="success" %}}
 
-   For more information about how to use the `ofn install` command, see [`ofn install` Parameters](../../reference/cli#ofn-install-parameters).
+   For more information about how to install OpenFunction with Helm, see [Install OpenFunction with Helm](https://github.com/OpenFunction/charts#install-the-chart).
 
    {{% /alert %}}
+
+3. Run the following command to verify OpenFunction is up and running:
+   ```shell
+   kubectl get po -n openfunction
+   ```
 
 ## Uninstall OpenFunction
 ### Helm
@@ -96,19 +81,74 @@ helm uninstall openfunction -n openfunction
 ```
 {{% alert title="Note" color="success" %}}
 
-For more information about how to uninstall OpenFunction with Helm, see [Uninstall OpenFunction with Helm](https://github.com/OpenFunction/charts/tree/release-0.6#uninstall-the-chart).
+For more information about how to uninstall OpenFunction with Helm, see [Uninstall OpenFunction with Helm](https://github.com/OpenFunction/charts#uninstall-the-chart).
 
 {{% /alert %}}
 
-### CLI
-If you installed OpenFunction with CLI, run the following command to uninstall OpenFunction and its dependencies.
+## Upgrade OpenFunction
+
 ```shell
-ofn uninstall --all
+helm upgrade [RELEASE_NAME] openfunction/openfunction -n openfunction
+```
+
+With Helm v3, CRDs created by this chart are not updated by default and should be manually updated.
+See also the [Helm Documentation on CRDs](https://helm.sh/docs/chart_best_practices/custom_resource_definitions).
+
+_Refer to [helm upgrade](https://helm.sh/docs/helm/helm_upgrade/) for command documentation._
+
+### Upgrading an existing Release to a new version
+
+### From OpenFunction v0.6.0 to OpenFunction v0.7.x
+
+There is a breaking change when upgrading from v0.6.0 to 0.7.x which requires additional manual operations.
+#### Uninstall the Chart
+
+First, you'll need to uninstall the old `openfunction` release:
+```shell
+helm uninstall openfunction -n openfunction
+```
+
+Confirm that the component namespaces have been deleted, it will take a while:
+```shell
+kubectl get ns -o=jsonpath='{range .items[?(@.metadata.annotations.meta\.helm\.sh/release-name=="openfunction")]}{.metadata.name}: {.status.phase}{"\n"}{end}'
+```
+
+> If the knative-serving namespace is in the terminating state for a long time, try running the following command and remove finalizers:
+```shell
+kubectl edit ingresses.networking.internal.knative.dev -n knative-serving
+```
+
+#### Upgrade OpenFunction CRDs
+Then you'll need to upgrade the new OpenFunction CRDs
+
+```shell
+kubectl apply -f https://openfunction.sh1a.qingstor.com/crds/v0.7.0/openfunction.yaml
+```
+
+#### Upgrade dependent components CRDs
+You also need to upgrade the dependent components' CRDs
+> You only need to deal with the components included in the existing Release.
+- knative-serving CRDs
+    ```shell
+    kubectl apply -f https://openfunction.sh1a.qingstor.com/crds/v0.7.0/knative-serving.yaml
+    ```
+- shipwright-build CRDs
+    ```shell
+    kubectl apply -f https://openfunction.sh1a.qingstor.com/crds/v0.7.0/shipwright-build.yaml
+    ```
+- tekton-pipelines CRDs
+    ```shell
+    kubectl apply -f https://openfunction.sh1a.qingstor.com/crds/v0.7.0/tekton-pipelines.yaml
+    ```
+
+#### Install new chart
+```shell
+helm repo update
+helm install openfunction openfunction/openfunction -n openfunction
 ```
 
 {{% alert title="Note" color="success" %}}
 
-For more information about how to use the `ofn uninstall` command, see [`ofn uninstall` Parameters](../../reference/cli#ofn-uninstall-parameters).
+For more information about how to upgrade OpenFunction with Helm, see [Upgrade OpenFunction with Helm](https://github.com/OpenFunction/charts#upgrading-chart).
 
 {{% /alert %}}
-
